@@ -37,6 +37,9 @@ GrB_Info GB_kroner                  // C = kron (A,B)
     bool A_is_pattern,              // true if values of A are not used
     const GrB_Matrix B,             // input matrix
     bool B_is_pattern,              // true if values of B are not used
+    const GrB_Matrix Mask,
+    const bool Mask_comp,
+    const bool Mask_struct,
     GB_Werk Werk
 ) ;
 
