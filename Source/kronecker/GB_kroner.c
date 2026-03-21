@@ -28,6 +28,7 @@
 #include "emult/GB_emult.h"
 #include "slice/include/GB_search_for_vector.h"
 #include "jitifyer/GB_stringify.h"
+#include "memory/include/GB_memory_macros.h"
 
 GrB_Info GB_kroner                  // C = kron (A,B)
 (
@@ -133,7 +134,7 @@ GrB_Info GB_kroner                  // C = kron (A,B)
     bool C_iso = GB_emult_iso (cscalar, ctype, A, B, op) ;
 
     //--------------------------------------------------------------------------
-    // allocate the output matrix C
+    // compute info of the output matrix C
     //--------------------------------------------------------------------------
 
     // C has the same type as z for the multiply operator, z=op(x,y)
@@ -155,7 +156,125 @@ GrB_Info GB_kroner                  // C = kron (A,B)
 
     // C is hypersparse if either A or B are hypersparse.  It is never bitmap.
     bool C_is_hyper = (cvdim > 1) && (Ah != NULL || Bh != NULL) ;
+
+    //--------------------------------------------------------------------------
+    // get operator
+    //--------------------------------------------------------------------------
+
+    GxB_binary_function fmult = op->binop_function ;
+    GxB_index_binary_function fmult_idx = op->idxbinop_function ;
+    const void *theta = op->theta ;
+    GB_cast_function cast_A = NULL, cast_B = NULL ;
+    if (!A_is_pattern)
+    { 
+        cast_A = GB_cast_factory (op->xtype->code, A->type->code) ;
+    }
+    if (!B_is_pattern)
+    { 
+        cast_B = GB_cast_factory (op->ytype->code, B->type->code) ;
+    }
+
+    //--------------------------------------------------------------------------
+    // count nonzero elements in result
+    //--------------------------------------------------------------------------
+
     bool C_is_full = GB_as_if_full (A) && GB_as_if_full (B) ;
+    const bool A_iso = A->iso ;
+    const bool B_iso = B->iso ;
+
+    int64_t kC ;
+    GrB_Index cnz = 0 ;
+    int64_t nvec_nonempty = 0 ;
+    size_t p_size ;
+    int64_t *restrict p = GB_MALLOC_MEMORY (cnvec + 1, sizeof(int64_t), &(p_size)) ;
+    ASSERT (p_size == GB_Global_memtable_size (p)) ;
+    GB_memset (p, 0, p_size, nthreads) ;
+    bool p_is_32 = (ctype == GrB_INT32) ;
+    #define P_IS_32 p_is_32
+
+    size_t h_size = 0, hp_size = 0 ;
+    int64_t *restrict h = NULL ;
+    int64_t *restrict hp = NULL ;
+    
+        // via the JIT kernel
+    info = GB_kroner_jit (A, op, flipij, A, B, nthreads) ;
+
+    if (info == GrB_NO_VALUE)
+    { 
+        // via the generic kernel
+        #define GB_A_TYPE GB_void
+        #define GB_B_TYPE GB_void
+        #define GB_C_TYPE GB_void
+        #define GB_P_TEMP p
+        #define GB_H_TEMP h
+        #define GB_HP_TEMP hp
+        #define GB_A_ISO A_iso
+        #define GB_B_ISO B_iso
+        #define GB_C_ISO C_iso
+        #define GB_NVEC_NONEMPTY_PTR &nvec_nonempty
+        const bool A_iso = A->iso ;
+        const bool B_iso = B->iso ;
+        const int64_t asize = A->type->size ;
+        const int64_t bsize = B->type->size ;
+
+        #define GB_C_IS_FULL C_is_full
+        #define GB_C_IS_HYPER C_is_hyper
+        #define OP_IS_POSITIONAL ((void*)(fmult) == NULL)
+
+        #define GB_DECLAREA(a) GB_void a [GB_VLA(asize)]
+        #define GB_DECLAREB(b) GB_void b [GB_VLA(bsize)]
+
+        #define GB_GETA(a,Ax,p,iso)                         \
+        {                                                   \
+            if (!A_is_pattern)                              \
+            {                                               \
+                cast_A (a, Ax + (p)*asize, asize) ;         \
+            }                                               \
+        }
+
+        #define GB_GETB(b,Bx,p,iso)                         \
+        {                                                   \
+            if (!B_is_pattern)                              \
+            {                                               \
+                cast_B (b, Bx + (p)*bsize, bsize) ;         \
+            }                                               \
+        }
+
+        #define GB_KRONECKER_COUNTER(c,a,b)                 \
+        {                                                   \
+                /* standard binary operator */              \
+                fmult (c, a, b) ;                           \
+                for (size_t i = 0 ; i < csize ; ++i)        \
+                {                                           \
+                    if (*(c +  i))                          \
+                    {                                       \
+                        cnz++ ;                             \
+                        p [kC]++ ;                          \
+                        break;                              \
+                    }                                       \
+                }                                           \
+        }
+
+        #define GB_GENERIC
+        #include "ewise/include/GB_ewise_shared_definitions.h"
+        #include "kronecker/template/GB_kroner_realsize_template.c"
+        info = GrB_SUCCESS ;
+    }
+
+    //--------------------------------------------------------------------------
+    // quick return if C is empty
+    //--------------------------------------------------------------------------
+
+    if (cnz == 0)
+    { 
+        GB_FREE_WORKSPACE ;
+        return (GrB_SUCCESS) ;
+    }
+
+    //--------------------------------------------------------------------------
+    // allocate the output matrix C
+    //--------------------------------------------------------------------------
+
     int C_sparsity = C_is_full ? GxB_FULL :
         ((C_is_hyper) ? GxB_HYPERSPARSE : GxB_SPARSE) ;
 
@@ -165,10 +284,20 @@ GrB_Info GB_kroner                  // C = kron (A,B)
     GB_determine_pji_is_32 (&Cp_is_32, &Cj_is_32, &Ci_is_32,
         C_sparsity, cnzmax, (int64_t) cvlen, (int64_t) cvdim, Werk) ;
 
-    GB_OK (GB_new_bix (&C, // full, sparse, or hyper; existing header
+    if (C_is_hyper)
+    {
+        GB_OK (GB_new_bix (&C, // full, sparse, or hyper; existing header
+        ctype, (int64_t) cvlen, (int64_t) cvdim, GB_ph_malloc, C_is_csc,
+        C_sparsity, true, B->hyper_switch, nvec_nonempty, cnzmax, true, C_iso,
+        Cp_is_32, Cj_is_32, Ci_is_32)) ;
+    }
+    else
+    {
+        GB_OK (GB_new_bix (&C, // full, sparse, or hyper; existing header
         ctype, (int64_t) cvlen, (int64_t) cvdim, GB_ph_malloc, C_is_csc,
         C_sparsity, true, B->hyper_switch, cnvec, cnzmax, true, C_iso,
         Cp_is_32, Cj_is_32, Ci_is_32)) ;
+    }
 
     //--------------------------------------------------------------------------
     // compute the column counts of C: Cp and Ch if C is hypersparse
@@ -177,40 +306,25 @@ GrB_Info GB_kroner                  // C = kron (A,B)
     GB_Cp_DECLARE (Cp, ) ; GB_Cp_PTR (Cp, C) ;
     GB_Ch_DECLARE (Ch, ) ; GB_Ch_PTR (Ch, C) ;
     #define GB_Cp_IS_32 Cp_is_32
+    size_t C_elem_size = Cp_is_32 ? sizeof(int32_t) : sizeof(int64_t);
 
     if (!C_is_full)
-    { 
-        // C is sparse or hypersparse
-        int64_t kC ;
-        #pragma omp parallel for num_threads(nthreads) schedule(static)
-        for (kC = 0 ; kC < cnvec ; kC++)
-        {
-            const int64_t kA = kC / bnvec ;
-            const int64_t kB = kC % bnvec ;
-            // get A(:,jA), the (kA)th vector of A
-            const int64_t jA = GBh_A (Ah, kA) ;
-            const int64_t aknz = (Ap == NULL) ? avlen :
-                (GB_IGET (Ap, kA+1) - GB_IGET (Ap, kA)) ;
-            // get B(:,jB), the (kB)th vector of B
-            const int64_t jB = GBh_B (Bh, kB) ;
-            const int64_t bknz = (Bp == NULL) ? bvlen :
-                (GB_IGET (Bp, kB+1) - GB_IGET (Bp, kB)) ;
-            // determine # entries in C(:,jC), the (kC)th vector of C
-            // int64_t kC = kA * bnvec + kB ;
-            // Cp [kC] = aknz * bknz ;
-            GB_ISET (Cp, kC, aknz * bknz) ;
-            if (C_is_hyper)
-            { 
-                // Ch [kC] = jA * bvdim + jB ;
-                GB_ISET (Ch, kC, jA * bvdim + jB) ;
-            }
+    {
+        if (C_is_hyper)
+        { 
+            C->nvec = nvec_nonempty ;
+            GB_nvec_nonempty_set (C, nvec_nonempty) ;
+            GB_memcpy (Ch, h, C_elem_size * nvec_nonempty, nthreads) ;
+            GB_FREE_MEMORY (&h, h_size) ;
+            GB_memcpy (Cp, hp, C_elem_size * nvec_nonempty, nthreads) ;
+            GB_FREE_MEMORY (&hp, hp_size) ;
+            C->nvals = GB_IGET (Cp, nvec_nonempty) ;
         }
-
-        int64_t nvec_nonempty ;
-        GB_cumsum (Cp, Cp_is_32, cnvec, &nvec_nonempty, nthreads, Werk) ;
-        GB_nvec_nonempty_set (C, nvec_nonempty) ;
-        C->nvals = GB_IGET (Cp, cnvec) ;
-        if (C_is_hyper) C->nvec = cnvec ;
+        else
+        { 
+            GB_memcpy (Cp, p, C_elem_size * (cnvec + 1), nthreads) ;
+            C->nvals = GB_IGET (Cp, cnvec) ;
+        }
     }
 
     C->magic = GB_MAGIC ;
@@ -233,17 +347,6 @@ GrB_Info GB_kroner                  // C = kron (A,B)
     }
 
     //--------------------------------------------------------------------------
-    // quick return if C is empty
-    //--------------------------------------------------------------------------
-
-    int64_t cnz = GB_nnz (C) ;
-    if (cnz == 0)
-    { 
-        GB_FREE_WORKSPACE ;
-        return (GrB_SUCCESS) ;
-    }
-
-    //--------------------------------------------------------------------------
     // C = kron (A,B)
     //--------------------------------------------------------------------------
 
@@ -263,19 +366,6 @@ GrB_Info GB_kroner                  // C = kron (A,B)
         const bool B_iso = B->iso ;
         const int64_t asize = A->type->size ;
         const int64_t bsize = B->type->size ;
-
-        GxB_binary_function fmult = op->binop_function ;
-        GxB_index_binary_function fmult_idx = op->idxbinop_function ;
-        const void *theta = op->theta ;
-        GB_cast_function cast_A = NULL, cast_B = NULL ;
-        if (!A_is_pattern)
-        { 
-            cast_A = GB_cast_factory (op->xtype->code, A->type->code) ;
-        }
-        if (!B_is_pattern)
-        { 
-            cast_B = GB_cast_factory (op->ytype->code, B->type->code) ;
-        }
 
         #define GB_C_IS_FULL C_is_full
 
@@ -304,6 +394,14 @@ GrB_Info GB_kroner                  // C = kron (A,B)
             {                                               \
                 /* standard binary operator */              \
                 fmult (Cx +(pC)*csize, a, b) ;              \
+                for (size_t i = 0 ; i < csize ; ++i)        \
+                {                                           \
+                    if (*(Cx + (pC*csize + i)))             \
+                    {                                       \
+                        pC-- ;                              \
+                        break;                              \
+                    }                                       \
+                }                                           \
             }                                               \
             else                                            \
             {                                               \
@@ -327,6 +425,7 @@ GrB_Info GB_kroner                  // C = kron (A,B)
         info = GrB_SUCCESS ;
     }
 
+    GB_FREE_MEMORY (&p, p_size);
     //--------------------------------------------------------------------------
     // remove empty vectors from C, if hypersparse
     //--------------------------------------------------------------------------
