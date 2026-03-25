@@ -35,9 +35,11 @@ GrB_Info GB_kroner                  // C = kron (A,B)
     const bool flipij,              // if true, i and j are flipped: z=(x,y,j,i)
     const GrB_Matrix A,             // input matrix
     bool A_is_pattern,              // true if values of A are not used
+    bool A_transpose,
     const GrB_Matrix B,             // input matrix
     bool B_is_pattern,              // true if values of B are not used
-    const GrB_Matrix Mask,
+    bool B_transpose,
+    const GrB_Matrix M,
     const bool Mask_comp,
     const bool Mask_struct,
     GB_Werk Werk
