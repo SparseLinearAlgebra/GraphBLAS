@@ -245,12 +245,8 @@ GrB_Info GB_kroner                  // C = kron (A,B)
 
         // GB_cumsum for MT->p
 
-        double work = M->vdim ;
-        int nthreads_max = GB_Context_nthreads_max ( ) ;
-        double chunk = GB_Context_chunk ( ) ;
-        int cumsum_threads = GB_nthreads (work, chunk, nthreads_max) ;
-        M->p_is_32 ? GB_cumsum(MTp32, M->p_is_32, M->vdim, NULL, cumsum_threads, Werk) :
-        GB_cumsum(MTp64, M->p_is_32, M->vdim, NULL, cumsum_threads, Werk) ;
+        M->p_is_32 ? GB_cumsum(MTp32, M->p_is_32, M->vdim, NULL, masked_nthreads, Werk) :
+        GB_cumsum(MTp64, M->p_is_32, M->vdim, NULL, masked_nthreads, Werk) ;
 
         centries = M->p_is_32 ? MTp32[M->vdim] : MTp64[M->vdim] ;
 
