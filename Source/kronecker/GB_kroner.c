@@ -134,7 +134,7 @@ GrB_Info GB_kroner                  // C = kron (A,B)
     // can apply mask
     //--------------------------------------------------------------------------
 
-    if (M != NULL && !Mask_comp) 
+    if (M != NULL && !Mask_comp)
     {
         GrB_Matrix A = A_in ;
         GrB_Matrix B = B_in ;
@@ -181,12 +181,17 @@ GrB_Info GB_kroner                  // C = kron (A,B)
         cast_A = GB_cast_factory (op->xtype->code, A->type->code) ;
         cast_B = GB_cast_factory (op->ytype->code, B->type->code) ;
 
+        double work = M->vdim ;
+        int nthreads_max = GB_Context_nthreads_max ( ) ;
+        double chunk = GB_Context_chunk ( ) ;
+        int masked_nthreads = GB_nthreads (work, chunk, nthreads_max) ;
+
         int64_t vlen = M->vlen ;
-        #pragma omp parallel
+        #pragma omp parallel num_threads(masked_nthreads)
         {
             GrB_Index offset ;
 
-            #pragma omp for reduction(+:nvecs)
+            #pragma omp for reduction(+:nvecs) schedule(static)
             for (GrB_Index k = 0 ; k < M->nvec ; k++)
             {
                 GrB_Index j = Mh32 ? GBH (Mh32, k) : GBH (Mh64, k) ;
@@ -205,11 +210,11 @@ GrB_Info GB_kroner                  // C = kron (A,B)
 
                     if (Mask_struct || (M->iso ? ((int8_t*)M->x)[0] : ((int8_t*)M->x)[p]))
                     {
-                        GrB_Index arow = A_transpose ? (Mcol / bncols) : (Mrow / bnrows);
-                        GrB_Index acol = A_transpose ? (Mrow / bnrows) : (Mcol / bncols);
+                        GrB_Index arow = A_transpose ? (Mcol / bncols) : (Mrow / bnrows) ;
+                        GrB_Index acol = A_transpose ? (Mrow / bnrows) : (Mcol / bncols) ;
 
-                        GrB_Index brow = B_transpose ? (Mcol % bncols) : (Mrow % bnrows);
-                        GrB_Index bcol = B_transpose ? (Mrow % bnrows) : (Mcol % bncols);
+                        GrB_Index brow = B_transpose ? (Mcol % bncols) : (Mrow % bnrows) ;
+                        GrB_Index bcol = B_transpose ? (Mrow % bnrows) : (Mcol % bncols) ;
 
                         bool code = GB_lookup_xoffset(&offset, A, arow, acol) ;
                         if (!code)
@@ -281,13 +286,13 @@ GrB_Info GB_kroner                  // C = kron (A,B)
             goto OUT_OF_MEM_i ;
         }
 
-        #pragma omp parallel
+        #pragma omp parallel num_threads(masked_nthreads)
         {
             GrB_Index offset ;
             GB_void a_elem[op->xtype->size] ;
             GB_void b_elem[op->ytype->size] ;
 
-            #pragma omp for
+            #pragma omp for schedule(static)
             for (GrB_Index k = 0 ; k < M->nvec ; k++)
             {
                 GrB_Index j = Mh32 ? GBH (Mh32, k) : GBH (Mh64, k) ;

@@ -180,8 +180,12 @@ GrB_Info GB_kron                    // C<M> = accum (C, kron(A,B))
         bool A_is_pattern, B_is_pattern ;
         GB_binop_pattern (&A_is_pattern, &B_is_pattern, false, op->opcode) ;
 
-        GB_kroner (MT, C->is_csc, op, false, A, A_is_pattern, A_transpose, B, B_is_pattern, B_transpose,
+        GrB_Info masked_kroner_info = GB_kroner (MT, C->is_csc, op, false, A, A_is_pattern, A_transpose, B, B_is_pattern, B_transpose,
         M, Mask_comp, Mask_struct, Werk) ;
+        if (masked_kroner_info != GrB_SUCCESS)
+        {
+            return masked_kroner_info ;
+        }
 
         if (MT->is_csc != C->is_csc) {
             GrB_Info MTtranspose = GB_transpose_in_place (MT, true, Werk) ;
@@ -212,7 +216,12 @@ GrB_Info GB_kron                    // C<M> = accum (C, kron(A,B))
                 return GrB_OUT_OF_MEMORY ;
             }
 
-            #pragma omp parallel for
+            double work = M->vdim ;
+            int nthreads_max = GB_Context_nthreads_max ( ) ;
+            double chunk = GB_Context_chunk ( ) ;
+            int masked_hyper_threads = GB_nthreads (work, chunk, nthreads_max) ;
+
+            #pragma omp parallel for num_threads(masked_hyper_threads) schedule(static)
             for (GrB_Index i = 0; i < MT->vdim; i++)
             {
                 if (MT->j_is_32) { MTh32[i] = i ; } else { MTh64[i] = i ; } 
