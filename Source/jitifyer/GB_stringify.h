@@ -1855,7 +1855,12 @@ GrB_Info GB_kroner_jit
     const GrB_BinaryOp binaryop,
     const bool flipij,
     const GrB_Matrix A,
+    const bool A_transpose,
     const GrB_Matrix B,
+    const bool B_transpose,
+    const GrB_Matrix Mask,
+    const bool Mask_struct,
+    const bool Mask_comp,
     const int nthreads
 ) ;
 

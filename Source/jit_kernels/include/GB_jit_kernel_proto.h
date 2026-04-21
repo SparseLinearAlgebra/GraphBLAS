@@ -727,7 +727,12 @@ GrB_Info GB_jit_kernel_kroner                                           \
 (                                                                       \
     GrB_Matrix C,                                                       \
     const GrB_Matrix A,                                                 \
+    const bool A_transpose,                                             \
     const GrB_Matrix B,                                                 \
+    const bool B_transpose,                                             \
+    const GrB_Matrix Mask,                                              \
+    const bool Mask_struct,                                             \
+    const bool Mask_comp,                                               \
     const int nthreads,                                                 \
     const void *theta,                                                  \
     const GB_callback_struct *restrict my_callback                      \

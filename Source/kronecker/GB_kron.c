@@ -37,7 +37,7 @@
 #include "mask/GB_accum_mask.h"
 
 static bool GB_lookup_xoffset (
-    GrB_Index* p,
+    GrB_Index *p,
     GrB_Matrix A,
     GrB_Index row,
     GrB_Index col
@@ -49,7 +49,7 @@ static bool GB_lookup_xoffset (
     if (A->p == NULL)
     {
         GrB_Index offset = vector * A->vlen + coord ;
-        if (A->b == NULL || ((int8_t*)A->b)[offset])
+        if (A->b == NULL || ((int8_t *)A->b)[offset])
         {
             *p = A->iso ? 0 : offset ;
             return true ;
@@ -62,8 +62,8 @@ static bool GB_lookup_xoffset (
 
     if (A->h == NULL)
     {
-        start = A->p_is_32 ? ((uint32_t*)A->p)[vector] : ((uint64_t*)A->p)[vector] ;
-        end = A->p_is_32 ? ((uint32_t*)A->p)[vector + 1] : ((uint64_t*)A->p)[vector + 1] ;
+        start = A->p_is_32 ? ((uint32_t *)A->p)[vector] : ((uint64_t *)A->p)[vector] ;
+        end = A->p_is_32 ? ((uint32_t *)A->p)[vector + 1] : ((uint64_t *)A->p)[vector + 1] ;
         end-- ;
         if (start > end) return false ;
         res = GB_binary_search(coord, A->i, A->i_is_32, &start, &end) ;
@@ -76,8 +76,8 @@ static bool GB_lookup_xoffset (
         res = GB_binary_search(vector, A->h, A->j_is_32, &start, &end) ;
         if (!res) return false ;
         int64_t k = start ;
-        start = A->p_is_32 ? ((uint32_t*)A->p)[k] : ((uint64_t*)A->p)[k] ;
-        end = A->p_is_32 ? ((uint32_t*)A->p)[k+1] : ((uint64_t*)A->p)[k+1] ;
+        start = A->p_is_32 ? ((uint32_t *)A->p)[k] : ((uint64_t *)A->p)[k] ;
+        end = A->p_is_32 ? ((uint32_t *)A->p)[k+1] : ((uint64_t *)A->p)[k+1] ;
         end-- ;
         if (start > end) return false ;
         res = GB_binary_search(coord, A->i, A->i_is_32, &start, &end) ;
@@ -92,7 +92,7 @@ GrB_Info GB_kron                    // C<M> = accum (C, kron(A,B))
 (
     GrB_Matrix C,                   // input/output matrix for results
     const bool C_replace,           // if true, clear C before writing to it
-    const GrB_Matrix M,             // optional mask for C, unused if NULL
+    const GrB_Matrix Mask,             // optional mask for C, unused if NULL
     const bool Mask_comp,           // if true, use !M
     const bool Mask_struct,         // if true, use the only structure of M
     const GrB_BinaryOp accum,       // optional accum for Z=accum(C,T)
@@ -110,6 +110,8 @@ GrB_Info GB_kron                    // C<M> = accum (C, kron(A,B))
     //--------------------------------------------------------------------------
 
     // C may be aliased with M, A, and/or B
+
+    GrB_Matrix M = Mask ;
 
     GrB_Info info ;
     struct GB_Matrix_opaque T_header, AT_header, BT_header ;
@@ -165,9 +167,7 @@ GrB_Info GB_kron                    // C<M> = accum (C, kron(A,B))
     GB_RETURN_IF_QUICK_MASK (C, C_replace, M, Mask_comp, Mask_struct) ;
 
     // check if it's possible to apply mask immediately in kron
-    // TODO: make MT of same CSR/CSC format as C
     // TODO: MT should have its own 32/64 bitness controls
-    // TODO: clear MT header
 
     bool Mask_is_applicable = M != NULL && !Mask_comp ;
     if (Mask_is_applicable) {
@@ -199,7 +199,7 @@ GrB_Info GB_kron                    // C<M> = accum (C, kron(A,B))
 
         if (MT_hypersparse)
         {
-            uint32_t* MTh32 = NULL ; uint64_t* MTh64 =  NULL ;
+            uint32_t *MTh32 = NULL ; uint64_t *MTh64 =  NULL ;
             if (MT->j_is_32)
             {
                 MTh32 = GB_malloc_memory (MT->vdim, sizeof(uint32_t), &allocated) ;
@@ -227,7 +227,7 @@ GrB_Info GB_kron                    // C<M> = accum (C, kron(A,B))
                 if (MT->j_is_32) { MTh32[i] = i ; } else { MTh64[i] = i ; } 
             }
 
-            MT->h = MTh32 ? (void*)MTh32 : (void*)MTh64 ;
+            MT->h = MTh32 ? (void *)MTh32 : (void *)MTh64 ;
 
             GrB_Info MThyperprune = GB_hyper_prune (MT, Werk) ;
             if (MThyperprune != GrB_SUCCESS)
