@@ -167,7 +167,6 @@ GrB_Info GB_kron                    // C<M> = accum (C, kron(A,B))
     GB_RETURN_IF_QUICK_MASK (C, C_replace, M, Mask_comp, Mask_struct) ;
 
     // check if it's possible to apply mask immediately in kron
-    // TODO: MT should have its own 32/64 bitness controls
 
     bool Mask_is_applicable = M != NULL && !Mask_comp ;
     if (Mask_is_applicable) {

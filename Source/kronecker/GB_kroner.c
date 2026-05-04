@@ -274,8 +274,13 @@ GrB_Info GB_kroner
         // allocate Cp
         //----------------------------------------------------------------------
 
+        int64_t mnzmax = GB_nnz_max (Mask) ;
+        bool Cp_is_32, Cj_is_32, Ci_is_32;
+        GB_determine_pji_is_32 (&Cp_is_32, &Cj_is_32, &Ci_is_32,
+            GxB_SPARSE, mnzmax, (int64_t) Mask->vlen, (int64_t) Mask->vdim, Werk) ;
+
         uint32_t *Cp32 = NULL ; uint64_t *Cp64 = NULL ;
-        if (Mask->p_is_32)
+        if (Cp_is_32)
             Cp32 = GB_calloc_memory (Mask->vdim + 1, sizeof (uint32_t),
                 &allocated) ;
         else
@@ -349,8 +354,14 @@ GrB_Info GB_kroner
                         if (!GB_lookup_xoffset (&offset, B, brow, bcol))
                             continue ;
 
-                        if (Mask->p_is_32) { (Cp32 [j])++ ; }
-                        else               { (Cp64 [j])++ ; }
+                        if (Cp_is_32)
+                        {
+                            (Cp32 [j])++ ;
+                        }
+                        else
+                        {
+                            (Cp64 [j])++ ;
+                        }
                         nonempty = true ;
                     }
                 }
@@ -362,30 +373,34 @@ GrB_Info GB_kroner
         // prefix sum to get centries
         //----------------------------------------------------------------------
 
-        if (Mask->p_is_32)
-            GB_cumsum (Cp32, Mask->p_is_32, Mask->vdim, NULL, nthreads, Werk) ;
+        if (Cp_is_32)
+            GB_cumsum (Cp32, Cp_is_32, Mask->vdim, NULL, nthreads, Werk) ;
         else
-            GB_cumsum (Cp64, Mask->p_is_32, Mask->vdim, NULL, nthreads, Werk) ;
+            GB_cumsum (Cp64, Cp_is_32, Mask->vdim, NULL, nthreads, Werk) ;
 
-        centries = Mask->p_is_32 ? (int64_t) Cp32 [Mask->vdim]
-                                 : (int64_t) Cp64 [Mask->vdim] ;
+        centries = Cp_is_32 ? (int64_t) Cp32 [Mask->vdim]
+                            : (int64_t) Cp64 [Mask->vdim] ;
 
         //----------------------------------------------------------------------
         // allocate Ci
         //----------------------------------------------------------------------
 
         uint32_t *Ci32 = NULL ; uint64_t *Ci64 = NULL ;
-        if (Mask->i_is_32)
+        if (Ci_is_32)
             Ci32 = GB_malloc_memory (centries, sizeof (uint32_t), &allocated) ;
         else
             Ci64 = GB_malloc_memory (centries, sizeof (uint64_t), &allocated) ;
 
         if (centries > 0 && Ci32 == NULL && Ci64 == NULL)
         {
-            if (Mask->p_is_32) GB_free_memory (&Cp32,
-                (Mask->vdim + 1) * sizeof (uint32_t)) ;
-            else               GB_free_memory (&Cp64,
-                (Mask->vdim + 1) * sizeof (uint64_t)) ;
+            if (Cp_is_32)
+            {
+                GB_free_memory (&Cp32, (Mask->vdim + 1) * sizeof (uint32_t)) ;
+            }
+            else
+            {
+                GB_free_memory (&Cp64, (Mask->vdim + 1) * sizeof (uint64_t)) ;
+            }
             GB_FREE_WORKSPACE ;
             return GrB_OUT_OF_MEMORY ;
         }
@@ -400,14 +415,22 @@ GrB_Info GB_kroner
             Cx = GB_malloc_memory (1, op->ztype->size, &allocated) ;
             if (Cx == NULL)
             {
-                if (Mask->i_is_32) GB_free_memory (&Ci32,
-                    centries * sizeof (uint32_t)) ;
-                else               GB_free_memory (&Ci64,
-                    centries * sizeof (uint64_t)) ;
-                if (Mask->p_is_32) GB_free_memory (&Cp32,
-                    (Mask->vdim + 1) * sizeof (uint32_t)) ;
-                else               GB_free_memory (&Cp64,
-                    (Mask->vdim + 1) * sizeof (uint64_t)) ;
+                if (Ci_is_32)
+                {
+                    GB_free_memory (&Ci32, centries * sizeof (uint32_t)) ;
+                }
+                else
+                {
+                    GB_free_memory (&Ci64, centries * sizeof (uint64_t)) ;
+                }
+                if (Cp_is_32)
+                {
+                    GB_free_memory (&Cp32, (Mask->vdim + 1) * sizeof (uint32_t)) ;
+                }
+                else
+                {
+                    GB_free_memory (&Cp64, (Mask->vdim + 1) * sizeof (uint64_t)) ;
+                }
                 GB_FREE_WORKSPACE ;
                 return GrB_OUT_OF_MEMORY ;
             }
@@ -418,14 +441,22 @@ GrB_Info GB_kroner
             Cx = GB_malloc_memory (centries, op->ztype->size, &allocated) ;
             if (centries > 0 && Cx == NULL)
             {
-                if (Mask->i_is_32) GB_free_memory (&Ci32,
-                    centries * sizeof (uint32_t)) ;
-                else               GB_free_memory (&Ci64,
-                    centries * sizeof (uint64_t)) ;
-                if (Mask->p_is_32) GB_free_memory (&Cp32,
-                    (Mask->vdim + 1) * sizeof (uint32_t)) ;
-                else               GB_free_memory (&Cp64,
-                    (Mask->vdim + 1) * sizeof (uint64_t)) ;
+                if (Ci_is_32)
+                {
+                    GB_free_memory (&Ci32, centries * sizeof (uint32_t)) ;
+                }
+                else
+                {
+                    GB_free_memory (&Ci64, centries * sizeof (uint64_t)) ;
+                }
+                if (Cp_is_32)
+                {
+                    GB_free_memory (&Cp32, (Mask->vdim + 1) * sizeof (uint32_t)) ;
+                }
+                else
+                {
+                    GB_free_memory (&Cp64, (Mask->vdim + 1) * sizeof (uint64_t)) ;
+                }
                 GB_FREE_WORKSPACE ;
                 return GrB_OUT_OF_MEMORY ;
             }
@@ -438,19 +469,33 @@ GrB_Info GB_kroner
         GrB_Info Calloc = GB_new_bix (&C, op->ztype, vlen, Mask->vdim,
             GB_ph_null, Mask->is_csc, GxB_SPARSE, false, Mask->hyper_switch,
             Mask->vdim, centries, false, C_iso,
-            Mask->p_is_32, Mask->j_is_32, Mask->i_is_32) ;
+            Cp_is_32, Cj_is_32, Ci_is_32) ;
         if (Calloc != GrB_SUCCESS)
         {
-            if (C_iso) GB_free_memory (&Cx, op->ztype->size) ;
-            else       GB_free_memory (&Cx, centries * op->ztype->size) ;
-            if (Mask->i_is_32) GB_free_memory (&Ci32,
-                centries * sizeof (uint32_t)) ;
-            else               GB_free_memory (&Ci64,
-                centries * sizeof (uint64_t)) ;
-            if (Mask->p_is_32) GB_free_memory (&Cp32,
-                (Mask->vdim + 1) * sizeof (uint32_t)) ;
-            else               GB_free_memory (&Cp64,
-                (Mask->vdim + 1) * sizeof (uint64_t)) ;
+            if (C_iso)
+            {
+                GB_free_memory (&Cx, op->ztype->size) ;
+            }
+            else
+            {
+                GB_free_memory (&Cx, centries * op->ztype->size) ;
+            }
+            if (Ci_is_32)
+            {
+                GB_free_memory (&Ci32, centries * sizeof (uint32_t)) ;
+            }
+            else
+            {
+                GB_free_memory (&Ci64, centries * sizeof (uint64_t)) ;
+            }
+            if (Cp_is_32)
+            {
+                GB_free_memory (&Cp32, (Mask->vdim + 1) * sizeof (uint32_t)) ;
+            }
+            else
+            {
+                GB_free_memory (&Cp64, (Mask->vdim + 1) * sizeof (uint64_t)) ;
+            }
             GB_FREE_WORKSPACE ;
             return Calloc ;
         }
@@ -458,16 +503,15 @@ GrB_Info GB_kroner
         GB_free_memory (&C->i, C->i_size) ;
         GB_free_memory (&C->x, C->x_size) ;
 
-        C->p = Mask->p_is_32 ? (void *) Cp32 : (void *) Cp64 ;
-        C->i = Mask->i_is_32 ? (void *) Ci32 : (void *) Ci64 ;
+        C->p = Cp_is_32 ? (void *) Cp32 : (void *) Cp64 ;
+        C->i = Ci_is_32 ? (void *) Ci32 : (void *) Ci64 ;
         C->x = Cx ;
-        C->p_size = (Mask->p_is_32 ? sizeof (uint32_t)
-                     : sizeof (uint64_t))
-                     * (Mask->vdim + 1) ;
-        C->i_size = (Mask->i_is_32 ? sizeof (uint32_t)
-                     : sizeof (uint64_t)) * centries ;
+        C->p_size = (Cp_is_32 ? sizeof (uint32_t)
+                              : sizeof (uint64_t)) * (Mask->vdim + 1) ;
+        C->i_size = (Ci_is_32 ? sizeof (uint32_t)
+                              : sizeof (uint64_t)) * centries ;
         C->x_size = C->iso ? op->ztype->size
-                     : op->ztype->size * centries ;
+                           : op->ztype->size * centries ;
         C->magic = GB_MAGIC ;
         C->nvals = centries ;
         C->nvec_nonempty = (int64_t) nvecs ;

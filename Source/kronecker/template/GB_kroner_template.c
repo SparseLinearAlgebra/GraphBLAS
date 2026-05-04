@@ -186,8 +186,8 @@
 
                 int64_t pA_start = GBp_M (Mp, k, vlen) ;
                 int64_t pA_end = GBp_M (Mp, k+1, vlen) ;
-                GrB_Index pos = Mask->p_is_32 ? ((int32_t *)C->p)[j] : ((int64_t *)C->p)[j] ;
-                for (GrB_Index p = pA_start ; p < pA_end ; p++)
+                GrB_Index pos = GB_IGET(Cp, j);
+                for (GrB_Index p = pA_start; p < pA_end; p++)
                 {
                     if (!GBb_M (Mask->b, p)) continue ;
 
@@ -227,14 +227,7 @@
                         iy = B_transpose ? bcol : brow ;
                         jy = B_transpose ? brow : bcol ;
 
-                        if (Mask->i_is_32)
-                        {
-                            ((int32_t *)C->i)[pos] = i ;
-                        }
-                        else
-                        {
-                            ((int64_t *)C->i)[pos] = i ;
-                        }
+                        GB_ISET (Ci, pos, i) ;
 
                         GB_KRONECKER_OP (Cx, pos, a_elem, ix, jx, b_elem, iy, jy) ;
 
