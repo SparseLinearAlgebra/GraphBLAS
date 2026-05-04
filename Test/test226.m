@@ -9,8 +9,8 @@ rng ('default') ;
 A.matrix = sprand (5, 10, 0.4) ;
 B.matrix = ones (3, 2) ;
 B.iso = true ;
-M.matrix = sprandn (15, 20,0.2) ~= 0 ;
-MT.matrix = sprandn (9, 4, 20,0.2) ~= 0 ;
+M.matrix = sprand (15, 20, 0.2) ~= 0 ;
+MT.matrix = sprand (9, 4, 20, 0.2) ~= 0 ;
 
 mult.opname = 'times' ;
 mult.optype = 'double' ;
@@ -42,4 +42,3 @@ C2 = GB_spec_kron (Cin, MT, [ ], mult, B, B, [ ]) ;
 GB_spec_compare (C1, C2) ;
 
 fprintf ('\ntest226: all tests passed\n') ;
-

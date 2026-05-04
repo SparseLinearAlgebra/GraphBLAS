@@ -33,18 +33,15 @@ an = 3 ;
 bm = 4 ;
 bn = 2 ;
 
-Ax_temp = 100 * sprandn (am, an, 0.5);
-Bx_temp = 100 * sprandn (bm, bn, 0.5);
-
-Ax = sparse(round(Ax_temp));
-Bx = sparse(round(Bx_temp));
+Ax = sparse (100 * sprandn (am, an, 0.5)) ;
+Bx = sparse (100 * sprandn (bm, bn, 0.5)) ;
 
 cm = am * bm ;
 cn = an * bn ;
-Cx = sparse (cm,cn) ;
-Maskmat = sprandn (cm,cn,0.2) ~= 0 ;
-ATmat = Ax' ;
-BTmat = Bx' ;
+Cx = sparse (cm, cn) ;
+Maskmat = sprandn (cm, cn, 0.2) ~= 0 ;
+AT = Ax' ;
+BT = Bx' ;
 
 for k2 = [4 7 45:52 ]
     for k1 = 1:4
@@ -71,26 +68,16 @@ for k2 = [4 7 45:52 ]
                             clear A
                             A.matrix = Ax ;
                             A.is_hyper = A_is_hyper ;
-                            A.is_csc   = A_is_csc   ;
+                            A.is_csc = A_is_csc   ;
 
                             clear B
                             B.matrix = Bx ;
                             B.is_hyper = B_is_hyper ;
-                            B.is_csc   = B_is_csc   ;
+                            B.is_csc = B_is_csc   ;
 
                             clear C
-                            C.matrix = sparse (cm,cn) ;
-                            C.is_csc   = C_is_csc   ;
-
-                            clear AT
-                            AT.matrix = ATmat ;
-                            AT.is_hyper = A_is_hyper ;
-                            AT.is_csc = A.is_csc ;
-
-                            clear BT
-                            BT.matrix = BTmat ;
-                            BT.is_hyper = B_is_hyper ;
-                            BT.is_csc = B.is_csc ;
+                            C.matrix = Cx ;
+                            C.is_csc = C_is_csc   ;
 
                             %---------------------------------------
                             % kron(A,B)
@@ -130,41 +117,39 @@ for k2 = [4 7 45:52 ]
 
                             % tests with Mask
                             for Mask_is_hyper = 0:1
-                            for Mask_is_csc = 0:1
-                            fprintf('*')
+                                for Mask_is_csc = 0:1
 
-                            A.is_csc = A_is_csc ;
-                            B.is_csc = B_is_csc ;
-                            A.is_hyper = A_is_hyper ;
-                            B.is_hyper = B_is_hyper ;
+                                    A.is_csc = A_is_csc ;
+                                    B.is_csc = B_is_csc ;
+                                    A.is_hyper = A_is_hyper ;
+                                    B.is_hyper = B_is_hyper ;
 
-                            clear M
-                            M.matrix = Maskmat ;
-                            M.is_hyper = Mask_is_hyper ;
-                            M.is_csc = Mask_is_csc;
-                            C.is_csc = C_is_csc ;
+                                    clear M
+                                    M.matrix = Maskmat ;
+                                    M.is_hyper = Mask_is_hyper ;
+                                    M.is_csc = Mask_is_csc;
+                                    C.is_csc = C_is_csc ;
 
-                            % kron(A, B) with Mask
-                            C0 = GB_spec_kron (C, M, [ ], op, A, B, dnn) ;
-                            fprintf('#') ;
-                            C1 = GB_mex_kron (C, M, [ ], op, A, B, dnn) ;
-                            GB_spec_compare(C0, C1) ;
+                                    % kron(A, B) with Mask
+                                    C0 = GB_spec_kron (C, M, [ ], op, A, B, dnn) ;
+                                    C1 = GB_mex_kron (C, M, [ ], op, A, B, dnn) ;
+                                    GB_spec_compare(C0, C1) ;
 
-                            % kron(A', B) with Mask
-                            C0 = GB_spec_kron (C, M, [ ], op, AT, B, dtn) ;
-                            C1 = GB_mex_kron  (C, M, [ ], op, AT, B, dtn) ;
-                            GB_spec_compare (C0, C1) ;
+                                    % kron(A', B) with Mask
+                                    C0 = GB_spec_kron (C, M, [ ], op, AT, B, dtn) ;
+                                    C1 = GB_mex_kron  (C, M, [ ], op, AT, B, dtn) ;
+                                    GB_spec_compare (C0, C1) ;
 
-                            % kron(A, B') with Mask
-                            C0 = GB_spec_kron (C, M, [ ], op, A, BT, dnt) ;
-                            C1 = GB_mex_kron  (C, M, [ ], op, A, BT, dnt) ;
-                            GB_spec_compare (C0, C1) ;
+                                    % kron(A, B') with Mask
+                                    C0 = GB_spec_kron (C, M, [ ], op, A, BT, dnt) ;
+                                    C1 = GB_mex_kron  (C, M, [ ], op, A, BT, dnt) ;
+                                    GB_spec_compare (C0, C1) ;
 
-                            % kron(A', B') with Mask
-                            C0 = GB_spec_kron (C, M, [ ], op, AT, BT, dtt) ;
-                            C1 = GB_mex_kron  (C, M, [ ], op, AT, BT, dtt) ;
-                            GB_spec_compare (C0, C1) ;
-                            end
+                                    % kron(A', B') with Mask
+                                    C0 = GB_spec_kron (C, M, [ ], op, AT, BT, dtt) ;
+                                    C1 = GB_mex_kron  (C, M, [ ], op, AT, BT, dtt) ;
+                                    GB_spec_compare (C0, C1) ;
+                                end
                             end
                         end
                     end
@@ -189,4 +174,3 @@ C1 = GB_mex_kron  (C, [ ], [ ], op, A, A, dnn) ;
 GB_spec_compare (C0, C1) ;
 
 fprintf ('\ntest227: all tests passed\n') ;
-
