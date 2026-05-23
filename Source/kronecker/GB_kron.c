@@ -23,16 +23,76 @@
     GB_Matrix_free (&T) ;   \
 }
 
+#define GBI(Ai,p,avlen) ((Ai == NULL) ? ((p) % (avlen)) : Ai [p])
+
+#define GBB(Ab,p)       ((Ab == NULL) ? 1 : Ab [p])
+
+#define GBP(Ap,k,avlen) ((Ap == NULL) ? ((k) * (avlen)) : Ap [k])
+
+#define GBH(Ah,k)       ((Ah == NULL) ? (k) : Ah [k])
+
 #include "kronecker/GB_kron.h"
 #include "mxm/GB_mxm.h"
 #include "transpose/GB_transpose.h"
 #include "mask/GB_accum_mask.h"
 
+static bool GB_lookup_xoffset (
+    GrB_Index *p,
+    GrB_Matrix A,
+    GrB_Index row,
+    GrB_Index col
+)
+{
+    GrB_Index vector = A->is_csc ? col : row ;
+    GrB_Index coord  = A->is_csc ? row : col ;
+
+    if (A->p == NULL)
+    {
+        GrB_Index offset = vector * A->vlen + coord ;
+        if (A->b == NULL || ((int8_t *)A->b)[offset])
+        {
+            *p = A->iso ? 0 : offset ;
+            return true ;
+        }
+        return false ;
+    }
+
+    int64_t start, end ;
+    bool res ;
+
+    if (A->h == NULL)
+    {
+        start = A->p_is_32 ? ((uint32_t *)A->p)[vector] : ((uint64_t *)A->p)[vector] ;
+        end = A->p_is_32 ? ((uint32_t *)A->p)[vector + 1] : ((uint64_t *)A->p)[vector + 1] ;
+        end-- ;
+        if (start > end) return false ;
+        res = GB_binary_search(coord, A->i, A->i_is_32, &start, &end) ;
+        if (res) { *p = A->iso ? 0 : start ; }
+        return res ;
+    }
+    else
+    {
+        start = 0 ; end = A->plen - 1 ;
+        res = GB_binary_search(vector, A->h, A->j_is_32, &start, &end) ;
+        if (!res) return false ;
+        int64_t k = start ;
+        start = A->p_is_32 ? ((uint32_t *)A->p)[k] : ((uint64_t *)A->p)[k] ;
+        end = A->p_is_32 ? ((uint32_t *)A->p)[k+1] : ((uint64_t *)A->p)[k+1] ;
+        end-- ;
+        if (start > end) return false ;
+        res = GB_binary_search(coord, A->i, A->i_is_32, &start, &end) ;
+        if (res) { *p = A->iso ? 0 : start ; }
+        return res ;
+    }
+}
+
+#include "emult/GB_emult.h"
+
 GrB_Info GB_kron                    // C<M> = accum (C, kron(A,B))
 (
     GrB_Matrix C,                   // input/output matrix for results
     const bool C_replace,           // if true, clear C before writing to it
-    const GrB_Matrix M,             // optional mask for C, unused if NULL
+    const GrB_Matrix Mask,             // optional mask for C, unused if NULL
     const bool Mask_comp,           // if true, use !M
     const bool Mask_struct,         // if true, use the only structure of M
     const GrB_BinaryOp accum,       // optional accum for Z=accum(C,T)
@@ -50,6 +110,8 @@ GrB_Info GB_kron                    // C<M> = accum (C, kron(A,B))
     //--------------------------------------------------------------------------
 
     // C may be aliased with M, A, and/or B
+
+    GrB_Matrix M = Mask ;
 
     GrB_Info info ;
     struct GB_Matrix_opaque T_header, AT_header, BT_header ;
@@ -104,6 +166,80 @@ GrB_Info GB_kron                    // C<M> = accum (C, kron(A,B))
     // quick return if an empty mask is complemented
     GB_RETURN_IF_QUICK_MASK (C, C_replace, M, Mask_comp, Mask_struct) ;
 
+    // check if it's possible to apply mask immediately in kron
+
+    bool Mask_is_applicable = M != NULL && !Mask_comp ;
+    if (Mask_is_applicable) {
+        bool MT_hypersparse = (A->h != NULL) || (B->h != NULL) ;
+        size_t allocated = 0 ;
+
+        GrB_Matrix MT = NULL ; struct GB_Matrix_opaque MT_header ;
+        GB_CLEAR_MATRIX_HEADER (MT, &MT_header) ;
+
+        bool A_is_pattern, B_is_pattern ;
+        GB_binop_pattern (&A_is_pattern, &B_is_pattern, false, op->opcode) ;
+
+        GrB_Info masked_kroner_info = GB_kroner (MT, C->is_csc, op, false, A, A_is_pattern, A_transpose, B, B_is_pattern, B_transpose,
+        M, Mask_comp, Mask_struct, Werk) ;
+        if (masked_kroner_info != GrB_SUCCESS)
+        {
+            return masked_kroner_info ;
+        }
+
+        if (MT->is_csc != C->is_csc) {
+            GrB_Info MTtranspose = GB_transpose_in_place (MT, true, Werk) ;
+            if (MTtranspose != GrB_SUCCESS)
+            {
+                GB_FREE_WORKSPACE ;
+                GB_Matrix_free (&MT) ;
+                return MTtranspose ;
+            }
+        }
+
+        if (MT_hypersparse)
+        {
+            uint32_t *MTh32 = NULL ; uint64_t *MTh64 =  NULL ;
+            if (MT->j_is_32)
+            {
+                MTh32 = GB_malloc_memory (MT->vdim, sizeof(uint32_t), &allocated) ;
+            }
+            else
+            {
+                MTh64 = GB_malloc_memory (MT->vdim, sizeof(uint64_t), &allocated) ;
+            }
+
+            if (MTh32 == NULL && MTh64 == NULL)
+            {
+                GB_FREE_WORKSPACE ;
+                GB_Matrix_free (&MT) ;
+                return GrB_OUT_OF_MEMORY ;
+            }
+
+            double work = M->vdim ;
+            int nthreads_max = GB_Context_nthreads_max ( ) ;
+            double chunk = GB_Context_chunk ( ) ;
+            int masked_hyper_threads = GB_nthreads (work, chunk, nthreads_max) ;
+
+            #pragma omp parallel for num_threads(masked_hyper_threads) schedule(static)
+            for (GrB_Index i = 0; i < MT->vdim; i++)
+            {
+                if (MT->j_is_32) { MTh32[i] = i ; } else { MTh64[i] = i ; } 
+            }
+
+            MT->h = MTh32 ? (void *)MTh32 : (void *)MTh64 ;
+
+            GrB_Info MThyperprune = GB_hyper_prune (MT, Werk) ;
+            if (MThyperprune != GrB_SUCCESS)
+            {
+                GB_FREE_WORKSPACE ;
+                GB_Matrix_free (&MT) ;
+                return MThyperprune ;
+            }
+        }
+
+        return (GB_accum_mask (C, NULL, NULL, accum, &MT, C_replace, Mask_comp, Mask_struct, Werk)) ;
+    }
+
     //--------------------------------------------------------------------------
     // transpose A and B if requested
     //--------------------------------------------------------------------------
@@ -152,8 +288,8 @@ GrB_Info GB_kron                    // C<M> = accum (C, kron(A,B))
 
     GB_CLEAR_MATRIX_HEADER (T, &T_header) ;
     GB_OK (GB_kroner (T, T_is_csc, op, flipij,
-        A_transpose ? AT : A, A_is_pattern,
-        B_transpose ? BT : B, B_is_pattern, Werk)) ;
+        A_transpose ? AT : A, A_is_pattern, A_transpose,
+        B_transpose ? BT : B, B_is_pattern, B_transpose, M, Mask_comp, Mask_struct, Werk)) ;
 
     GB_FREE_WORKSPACE ;
     ASSERT_MATRIX_OK (T, "T = kron(A,B)", GB0) ;

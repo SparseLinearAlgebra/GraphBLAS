@@ -15,7 +15,7 @@ GrB_Info GB_kron                    // C<M> = accum (C, kron(A,B))
 (
     GrB_Matrix C,                   // input/output matrix for results
     const bool C_replace,           // if true, clear C before writing to it
-    const GrB_Matrix M,             // optional mask for C, unused if NULL
+    const GrB_Matrix Mask,             // optional mask for C, unused if NULL
     const bool Mask_comp,           // if true, use !M
     const bool Mask_struct,         // if true, use the only structure of M
     const GrB_BinaryOp accum,       // optional accum for Z=accum(C,T)
@@ -35,8 +35,13 @@ GrB_Info GB_kroner                  // C = kron (A,B)
     const bool flipij,              // if true, i and j are flipped: z=(x,y,j,i)
     const GrB_Matrix A,             // input matrix
     bool A_is_pattern,              // true if values of A are not used
+    bool A_transpose,
     const GrB_Matrix B,             // input matrix
     bool B_is_pattern,              // true if values of B are not used
+    bool B_transpose,
+    const GrB_Matrix Mask,
+    const bool Mask_comp,
+    const bool Mask_struct,
     GB_Werk Werk
 ) ;
 
